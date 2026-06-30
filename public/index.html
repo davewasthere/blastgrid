@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>blastgrid</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header><h1>blast<span>grid</span></h1></header>
+
+      <section id="lobby">
+        <div class="panel namebox">
+          <label>Your name
+            <input id="name" maxlength="16" autocomplete="off" placeholder="player" />
+          </label>
+        </div>
+
+        <div class="panel rooms">
+          <h2>Rooms</h2>
+          <ul id="roomList"></ul>
+          <p id="noRooms">No rooms yet — create one below.</p>
+        </div>
+
+        <div class="panel createbox">
+          <input id="newRoom" maxlength="20" autocomplete="off" placeholder="new room name" />
+          <button id="createBtn">Create &amp; Join</button>
+        </div>
+
+        <p id="lobbyError" class="error"></p>
+      </section>
+
+      <section id="game" hidden>
+        <div id="hud"></div>
+        <div id="stage">
+          <canvas id="canvas" width="600" height="520"></canvas>
+          <div id="overlay"></div>
+        </div>
+        <div class="gamebar">
+          <button id="startBtn" hidden>Start</button>
+          <button id="leaveBtn">Leave</button>
+          <span id="roomLabel"></span>
+          <span class="hint">WASD / arrows to move · Space to drop bombs</span>
+        </div>
+      </section>
+    </div>
+
+    <script type="module" src="/bundle.js"></script>
+  </body>
+</html>

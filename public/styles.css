@@ -1,0 +1,155 @@
+:root {
+  --bg: #0e1320;
+  --panel: #18203200;
+  --panel-solid: #1a2436;
+  --ink: #e8edf6;
+  --muted: #93a0b8;
+  --accent: #ff9a2e;
+  --accent2: #4fc3f7;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: radial-gradient(1200px 800px at 50% -10%, #1a2740, var(--bg));
+  color: var(--ink);
+  min-height: 100vh;
+}
+
+#app {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+}
+
+header h1 {
+  font-size: 34px;
+  letter-spacing: 1px;
+  margin: 8px 0 18px;
+  text-align: center;
+}
+header h1 span { color: var(--accent); }
+
+.panel {
+  background: var(--panel-solid);
+  border: 1px solid #2a3550;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+
+label { display: block; color: var(--muted); font-size: 13px; }
+
+input {
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #34405e;
+  background: #0f1626;
+  color: var(--ink);
+  font-size: 15px;
+}
+input:focus { outline: 2px solid var(--accent2); border-color: var(--accent2); }
+
+h2 { margin: 0 0 10px; font-size: 16px; }
+
+#roomList { list-style: none; margin: 0; padding: 0; }
+#roomList li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid #2a3550;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: #121a2b;
+}
+.roominfo { font-size: 14px; }
+#noRooms { color: var(--muted); font-size: 14px; margin: 4px 0 0; }
+
+.createbox { display: flex; gap: 10px; align-items: flex-end; }
+.createbox input { margin-top: 0; }
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  background: #2c3a58;
+  color: var(--ink);
+  white-space: nowrap;
+}
+button:hover { background: #36476b; }
+#createBtn, #startBtn { background: var(--accent); color: #2a1400; }
+#createBtn:hover, #startBtn:hover { filter: brightness(1.08); }
+
+.error { color: #ff6b6b; min-height: 18px; font-size: 14px; text-align: center; }
+
+/* ---- game ---- */
+#hud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.hudrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel-solid);
+  border: 1px solid #2a3550;
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.hudrow.you { border-color: var(--accent2); }
+.hudrow.dead { opacity: 0.4; }
+.sw { width: 14px; height: 14px; border-radius: 4px; display: inline-block; }
+.nm { font-size: 13px; font-weight: 600; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.icons { display: inline-flex; align-items: center; gap: 1px; flex-wrap: wrap; }
+.ic { width: 14px; height: 14px; }
+
+#stage { position: relative; width: 600px; max-width: 100%; margin: 0 auto; }
+canvas {
+  display: block;
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid #2a3550;
+  background: #0c111c;
+  image-rendering: auto;
+}
+
+#overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 12, 20, 0.55);
+  border-radius: 10px;
+  text-align: center;
+}
+.ov-count { font-size: 96px; font-weight: 800; color: var(--accent); text-shadow: 0 4px 20px rgba(0,0,0,0.6); }
+.ov-msg { font-size: 18px; color: var(--ink); padding: 0 20px; }
+.ov-win { font-size: 30px; font-weight: 800; color: var(--accent); margin-bottom: 8px; }
+
+.gamebar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+#roomLabel { color: var(--muted); font-size: 14px; }
+.hint { color: var(--muted); font-size: 12px; margin-left: auto; }
+
+.pulse { animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255,154,46,0.6); }
+  50% { transform: scale(1.06); box-shadow: 0 0 0 8px rgba(255,154,46,0); }
+}

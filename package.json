@@ -1,0 +1,24 @@
+{
+  "name": "blastgrid",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Blastgrid — a browser multiplayer Bomberman-like arcade game with an authoritative WebSocket server.",
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "build": "node build.mjs",
+    "start": "node dist/server.js",
+    "dev": "node build.mjs && node dist/server.js",
+    "serve:detached": "node scripts/serve.mjs start",
+    "serve:status": "node scripts/serve.mjs status",
+    "serve:stop": "node scripts/serve.mjs stop"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.12",
+    "esbuild": "^0.23.0",
+    "typescript": "^5.5.4"
+  }
+}
