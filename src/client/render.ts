@@ -16,6 +16,18 @@ const DIR_OFFSET: Record<Dir, { x: number; y: number }> = {
   right: { x: 1, y: 0 },
 };
 
+// Flat tile palette (see reference): slate walls, deep-navy floor, orange
+// crates with a darker X, separated by a thin dark grid.
+const GRID_COL = "#0d1426"; // gap/background showing between tiles
+const FLOOR_COL = "#18213a";
+const WALL_COL = "#4d5a78";
+const WALL_TOP_COL = "#6f7ea1"; // light line along the top of walls
+const CRATE_COL = "#b9762f";
+const CRATE_TOP_COL = "#d6964a"; // lighter top of crates
+const CRATE_X_COL = "#5e3a17";
+const TILE_PAD = 1.5; // inset per side -> ~3px gap between tiles
+const TILE_RAD = 4; // tile corner radius
+
 interface EyeState {
   ex: number;
   ey: number;
@@ -47,8 +59,8 @@ export function drawWorld(
 ): void {
   const time = performance.now() / 1000;
 
-  // backdrop (screen space)
-  c.fillStyle = "#0c111c";
+  // backdrop (screen space) — the dark grid showing through the tile gaps
+  c.fillStyle = GRID_COL;
   c.fillRect(0, 0, cam.vw, cam.vh);
   if (!map) return;
 
@@ -60,16 +72,15 @@ export function drawWorld(
   const sx1 = Math.min(snap.worldW - 1, Math.ceil((cam.x + cam.vw) / TILE));
   const sy1 = Math.min(snap.worldH - 1, Math.ceil((cam.y + cam.vh) / TILE));
 
+  // flat tiles with a small gap; crates get a simple X
   for (let y = sy0; y <= sy1; y++) {
     for (let x = sx0; x <= sx1; x++) {
       const px = x * TILE;
       const py = y * TILE;
-      // floor
-      c.fillStyle = (x + y) % 2 === 0 ? "#1b2230" : "#202a3c";
-      c.fillRect(px, py, TILE, TILE);
       const t = map[y * snap.worldW + x];
       if (t === TILE_WALL) drawWall(c, px, py);
       else if (t === TILE_CRATE) drawCrate(c, px, py);
+      else fillTile(c, px, py, FLOOR_COL);
     }
   }
 
@@ -82,29 +93,58 @@ export function drawWorld(
   c.restore();
 }
 
-function drawWall(c: CanvasRenderingContext2D, x: number, y: number): void {
-  c.fillStyle = "#3a4663";
-  c.fillRect(x, y, TILE, TILE);
-  c.fillStyle = "#4a587b";
-  c.fillRect(x + 2, y + 2, TILE - 4, TILE - 6);
-  c.fillStyle = "#2c3650";
-  c.fillRect(x + 2, y + TILE - 6, TILE - 4, 4);
+function fillTile(c: CanvasRenderingContext2D, px: number, py: number, fill: string | CanvasGradient): void {
+  c.fillStyle = fill;
+  roundRect(c, px + TILE_PAD, py + TILE_PAD, TILE - 2 * TILE_PAD, TILE - 2 * TILE_PAD, TILE_RAD);
+  c.fill();
 }
 
-function drawCrate(c: CanvasRenderingContext2D, x: number, y: number): void {
-  c.fillStyle = "#8a5a2b";
-  c.fillRect(x + 1, y + 1, TILE - 2, TILE - 2);
-  c.fillStyle = "#a86c34";
-  c.fillRect(x + 4, y + 4, TILE - 8, TILE - 8);
-  c.strokeStyle = "#6b441f";
+// light line along the top inner edge of a tile (kept inside the rounded corners)
+function topLine(c: CanvasRenderingContext2D, px: number, py: number, col: string): void {
+  c.strokeStyle = col;
   c.lineWidth = 2;
-  c.strokeRect(x + 4, y + 4, TILE - 8, TILE - 8);
+  c.lineCap = "round";
+  const inset = TILE_PAD + TILE_RAD;
+  const ty = py + TILE_PAD + 2;
   c.beginPath();
-  c.moveTo(x + 4, y + 4);
-  c.lineTo(x + TILE - 4, y + TILE - 4);
-  c.moveTo(x + TILE - 4, y + 4);
-  c.lineTo(x + 4, y + TILE - 4);
+  c.moveTo(px + inset, ty);
+  c.lineTo(px + TILE - inset, ty);
   c.stroke();
+}
+
+function drawWall(c: CanvasRenderingContext2D, px: number, py: number): void {
+  fillTile(c, px, py, WALL_COL);
+  topLine(c, px, py, WALL_TOP_COL);
+}
+
+function drawCrate(c: CanvasRenderingContext2D, px: number, py: number): void {
+  // vertical gradient lightens the top of the crate
+  const g = c.createLinearGradient(0, py + TILE_PAD, 0, py + TILE - TILE_PAD);
+  g.addColorStop(0, CRATE_TOP_COL);
+  g.addColorStop(0.45, CRATE_COL);
+  g.addColorStop(1, CRATE_COL);
+  fillTile(c, px, py, g);
+  // bigger X
+  const m = TILE * 0.2;
+  c.strokeStyle = CRATE_X_COL;
+  c.lineWidth = 3.5;
+  c.lineCap = "round";
+  c.beginPath();
+  c.moveTo(px + m, py + m);
+  c.lineTo(px + TILE - m, py + TILE - m);
+  c.moveTo(px + TILE - m, py + m);
+  c.lineTo(px + m, py + TILE - m);
+  c.stroke();
+}
+
+function roundRect(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+  c.closePath();
 }
 
 function drawBomb(c: CanvasRenderingContext2D, gx: number, gy: number, fuse: number): void {
