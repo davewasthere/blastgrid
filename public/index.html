@@ -10,38 +10,30 @@
     <div id="app">
       <header><h1>blast<span>grid</span></h1></header>
 
-      <section id="lobby">
-        <div class="panel namebox">
+      <section id="enter">
+        <div class="panel">
+          <p class="lead">One shared world that grows as more players join. Roam, blow up
+            crates, grab powerups, and blast the other blobs.</p>
           <label>Your name
             <input id="name" maxlength="16" autocomplete="off" placeholder="player" />
           </label>
+          <button id="joinBtn">Join the world</button>
+          <p id="enterError" class="error"></p>
+          <p class="hint">WASD / arrows to move · Space to drop bombs</p>
         </div>
-
-        <div class="panel rooms">
-          <h2>Rooms</h2>
-          <ul id="roomList"></ul>
-          <p id="noRooms">No rooms yet — create one below.</p>
-        </div>
-
-        <div class="panel createbox">
-          <input id="newRoom" maxlength="20" autocomplete="off" placeholder="new room name" />
-          <button id="createBtn">Create &amp; Join</button>
-        </div>
-
-        <p id="lobbyError" class="error"></p>
       </section>
 
       <section id="game" hidden>
-        <div id="hud"></div>
-        <div id="stage">
-          <canvas id="canvas" width="600" height="520"></canvas>
-          <div id="overlay"></div>
+        <div id="hudbar">
+          <div id="hud"></div>
+          <span class="hint">WASD / arrows · Space to bomb</span>
         </div>
-        <div class="gamebar">
-          <button id="startBtn" hidden>Start</button>
-          <button id="leaveBtn">Leave</button>
-          <span id="roomLabel"></span>
-          <span class="hint">WASD / arrows to move · Space to drop bombs</span>
+        <div id="playarea">
+          <div id="stage">
+            <canvas id="canvas" width="760" height="600"></canvas>
+            <div id="status" hidden></div>
+          </div>
+          <aside id="scoreboard"></aside>
         </div>
       </section>
     </div>

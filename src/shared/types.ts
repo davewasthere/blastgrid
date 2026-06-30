@@ -1,19 +1,10 @@
-import type { Dir, PowerupKind, RoomPhase, Tile } from "./constants.js";
+import type { Dir, Tile } from "./constants.js";
 
 // ---- Network: client -> server ----
 
 export interface JoinMsg {
   type: "join";
-  room: string;
   name: string;
-}
-
-export interface LeaveMsg {
-  type: "leave";
-}
-
-export interface StartMsg {
-  type: "start";
 }
 
 // Held-input model: client reports the currently held direction (or null) and
@@ -25,29 +16,12 @@ export interface InputMsg {
   bomb: boolean;
 }
 
-export interface ListRoomsMsg {
-  type: "listRooms";
-}
-
-export type ClientMsg = JoinMsg | LeaveMsg | StartMsg | InputMsg | ListRoomsMsg;
+export type ClientMsg = JoinMsg | InputMsg;
 
 // ---- Network: server -> client ----
 
-export interface RoomSummary {
-  id: string;
-  players: number;
-  phase: RoomPhase;
-  hostName: string;
-}
-
-export interface RoomListMsg {
-  type: "rooms";
-  rooms: RoomSummary[];
-}
-
-export interface JoinedMsg {
-  type: "joined";
-  room: string;
+export interface WelcomeMsg {
+  type: "welcome";
   youId: string;
 }
 
@@ -60,7 +34,7 @@ export interface PlayerState {
   id: string;
   name: string;
   color: string;
-  // Smooth render position in tile units (e.g. 1.0, 1.5 ...).
+  // Smooth render position in world tile units.
   x: number;
   y: number;
   dir: Dir;
@@ -69,21 +43,22 @@ export interface PlayerState {
   bombs: number; // capacity
   flame: number; // blast radius
   speed: number; // speed level
-  isHost: boolean;
+  kills: number;
+  deaths: number;
 }
 
 export interface BombState {
   id: number;
-  x: number; // tile
-  y: number; // tile
+  x: number;
+  y: number;
   flame: number;
-  fuse: number; // ticks remaining (for client throb timing)
+  fuse: number;
 }
 
 export interface ExplosionCell {
   x: number;
   y: number;
-  life: number; // ticks remaining
+  life: number;
   maxLife: number;
 }
 
@@ -91,27 +66,22 @@ export interface PowerupState {
   id: number;
   x: number;
   y: number;
-  kind: PowerupKind;
+  kind: "bomb" | "flame" | "speed";
 }
 
 export interface SnapshotMsg {
   type: "snapshot";
   tick: number;
-  phase: RoomPhase;
-  countdown: number; // seconds remaining when in countdown
-  hostId: string;
-  winnerName: string | null;
-  map: Tile[]; // row-major, length MAP_WIDTH*MAP_HEIGHT
-  width: number;
-  height: number;
+  worldW: number;
+  worldH: number;
+  mapVersion: number;
+  // The full tile array is only included when it changed since this client last
+  // saw it (grow / crate destroyed). Otherwise the client reuses its cache.
+  map: Tile[] | null;
   players: PlayerState[];
   bombs: BombState[];
   explosions: ExplosionCell[];
   powerups: PowerupState[];
 }
 
-export type ServerMsg =
-  | RoomListMsg
-  | JoinedMsg
-  | ErrorMsg
-  | SnapshotMsg;
+export type ServerMsg = WelcomeMsg | ErrorMsg | SnapshotMsg;

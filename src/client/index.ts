@@ -1,40 +1,43 @@
 import { playExplosion, playPickup, unlockAudio } from "./audio.js";
+import { TILE, VIEW_H, VIEW_W, type Tile } from "../shared/constants.js";
 import { InputTracker } from "./input.js";
 import { Net } from "./net.js";
-import { render } from "./render.js";
-import type { PlayerState, RoomSummary, ServerMsg, SnapshotMsg } from "../shared/types.js";
+import { drawWorld } from "./render.js";
+import type { PlayerState, ServerMsg, SnapshotMsg } from "../shared/types.js";
 
 const NAME_KEY = "blastgrid.playerName";
-const TILE = 40;
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
-const lobby = $("lobby");
-const game = $("game");
+const enter = $("enter");
+const gameView = $("game");
 const nameInput = $<HTMLInputElement>("name");
-const roomList = $("roomList");
-const noRooms = $("noRooms");
-const newRoom = $<HTMLInputElement>("newRoom");
-const createBtn = $<HTMLButtonElement>("createBtn");
-const lobbyError = $("lobbyError");
+const joinBtn = $<HTMLButtonElement>("joinBtn");
+const enterError = $("enterError");
 const canvas = $<HTMLCanvasElement>("canvas");
-const overlay = $("overlay");
 const hud = $("hud");
-const startBtn = $<HTMLButtonElement>("startBtn");
-const leaveBtn = $<HTMLButtonElement>("leaveBtn");
-const roomLabel = $("roomLabel");
+const scoreboard = $("scoreboard");
+const status = $("status");
 const cctx = canvas.getContext("2d")!;
 
+canvas.width = VIEW_W * TILE;
+canvas.height = VIEW_H * TILE;
+
 let youId = "";
-let roomId = "";
 let latest: SnapshotMsg | null = null;
+let cachedMap: Tile[] | null = null;
+let mapW = 0;
+let mapH = 0;
 let seq = 0;
-let inputDir: PlayerState["dir"] | null = null;
-let inputBomb = false;
+
+// smooth camera (pixel space)
+const cam = { x: 0, y: 0 };
+let camReady = false;
 
 // sound-trigger memory
 let prevOwn: { bombs: number; flame: number; speed: number } | null = null;
 let hudSig = "";
+let boardSig = "";
 
 // ---- persisted name ----
 nameInput.value = localStorage.getItem(NAME_KEY) ?? "";
@@ -49,106 +52,65 @@ const net = new Net(onMessage);
 
 function onMessage(msg: ServerMsg): void {
   switch (msg.type) {
-    case "rooms":
-      if (!roomId) renderRoomList(msg.rooms);
-      break;
-    case "joined":
+    case "welcome":
       youId = msg.youId;
-      roomId = msg.room;
       prevOwn = null;
-      showGame();
+      camReady = false;
+      enter.hidden = true;
+      gameView.hidden = false;
+      input.setEnabled(true);
       break;
     case "error":
-      lobbyError.textContent = msg.message;
+      enterError.textContent = msg.message;
       break;
     case "snapshot":
+      if (msg.map) {
+        cachedMap = msg.map;
+        mapW = msg.worldW;
+        mapH = msg.worldH;
+      }
       latest = msg;
       handleSnapshotSounds(msg);
       break;
   }
 }
 
-// ---- lobby ----
-function renderRoomList(rooms: RoomSummary[]): void {
-  roomList.innerHTML = "";
-  noRooms.hidden = rooms.length > 0;
-  for (const r of rooms) {
-    const li = document.createElement("li");
-    const info = document.createElement("span");
-    info.className = "roominfo";
-    info.textContent = `${r.id} — ${r.players} player${r.players === 1 ? "" : "s"} · ${r.phase}`;
-    const join = document.createElement("button");
-    join.textContent = "Join";
-    join.onclick = () => joinRoom(r.id);
-    li.append(info, join);
-    roomList.append(li);
-  }
-}
-
-function joinRoom(room: string): void {
+// ---- join ----
+function join(): void {
   const name = nameInput.value.trim();
   if (!name) {
-    lobbyError.textContent = "Enter a name first.";
+    enterError.textContent = "Enter a name first.";
     nameInput.focus();
     return;
   }
-  lobbyError.textContent = "";
+  enterError.textContent = "";
   unlockAudio();
-  net.send({ type: "join", room, name });
+  net.send({ type: "join", name });
 }
-
-createBtn.onclick = () => {
-  const room = newRoom.value.trim();
-  if (!room) {
-    lobbyError.textContent = "Name your new room.";
-    newRoom.focus();
-    return;
-  }
-  joinRoom(room);
-};
-newRoom.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") createBtn.click();
+joinBtn.onclick = join;
+nameInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") join();
 });
-
-leaveBtn.onclick = () => {
-  net.send({ type: "leave" });
-  roomId = "";
-  youId = "";
-  latest = null;
-  input.setEnabled(false);
-  game.hidden = true;
-  lobby.hidden = false;
-  net.send({ type: "listRooms" });
-};
-
-startBtn.onclick = () => net.send({ type: "start" });
-
-function showGame(): void {
-  lobby.hidden = true;
-  game.hidden = false;
-  roomLabel.textContent = `Room: ${roomId}`;
-  canvas.width = 15 * TILE;
-  canvas.height = 13 * TILE;
-  input.setEnabled(true);
-}
 
 // ---- input ----
 const input = new InputTracker(
   (s) => {
-    inputDir = s.dir;
-    inputBomb = s.bomb;
-    net.send({ type: "input", seq: seq++, dir: inputDir, bomb: inputBomb });
+    net.send({ type: "input", seq: seq++, dir: s.dir, bomb: s.bomb });
   },
   () => unlockAudio(),
 );
 
 // ---- sound triggers ----
 function handleSnapshotSounds(snap: SnapshotMsg): void {
-  // a fresh blast: any flame cell that just spawned this tick
-  if (snap.explosions.some((e) => e.life === e.maxLife)) playExplosion();
-  // own pickup: a stat went up since last snapshot
   const me = snap.players.find((p) => p.id === youId);
+  // a fresh blast (flame at full life) within earshot of the player's view
   if (me) {
+    const rx = VIEW_W / 2 + 3;
+    const ry = VIEW_H / 2 + 3;
+    const nearBlast = snap.explosions.some(
+      (e) => e.life === e.maxLife && Math.abs(e.x - me.x) <= rx && Math.abs(e.y - me.y) <= ry,
+    );
+    if (nearBlast) playExplosion();
     if (prevOwn && (me.bombs > prevOwn.bombs || me.flame > prevOwn.flame || me.speed > prevOwn.speed)) {
       playPickup();
     }
@@ -156,7 +118,28 @@ function handleSnapshotSounds(snap: SnapshotMsg): void {
   }
 }
 
-// ---- HUD ----
+// ---- camera ----
+function updateCamera(me: PlayerState | undefined): void {
+  if (!me) return;
+  const worldPxW = mapW * TILE;
+  const worldPxH = mapH * TILE;
+  const tx = clamp(me.x * TILE + TILE / 2 - canvas.width / 2, 0, Math.max(0, worldPxW - canvas.width));
+  const ty = clamp(me.y * TILE + TILE / 2 - canvas.height / 2, 0, Math.max(0, worldPxH - canvas.height));
+  if (!camReady) {
+    cam.x = tx;
+    cam.y = ty;
+    camReady = true;
+  } else {
+    cam.x += (tx - cam.x) * 0.15;
+    cam.y += (ty - cam.y) * 0.15;
+  }
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+// ---- HUD (own gear) ----
 function icon(kind: "bomb" | "flame" | "speed"): string {
   if (kind === "bomb")
     return `<svg viewBox="0 0 16 16" class="ic"><circle cx="8" cy="9" r="5" fill="#10243a"/><circle cx="6" cy="7" r="1.4" fill="#7fd1ff"/><path d="M8 4 L10 2" stroke="#caa" stroke-width="1.5"/></svg>`;
@@ -165,57 +148,32 @@ function icon(kind: "bomb" | "flame" | "speed"): string {
   return `<svg viewBox="0 0 16 16" class="ic"><path d="M9 1 L3 9 H7 L6 15 L13 6 H9 Z" fill="#7ee06a" stroke="#0c3a10" stroke-width="0.8"/></svg>`;
 }
 
-function renderHud(players: PlayerState[]): void {
-  const sig = players
-    .map((p) => `${p.id}:${p.name}:${p.alive}:${p.bombs}:${p.flame}:${p.speed}:${p.isHost}`)
-    .join("|");
+function renderHud(me: PlayerState | undefined): void {
+  if (!me) return;
+  const sig = `${me.bombs}:${me.flame}:${me.speed}`;
   if (sig === hudSig) return;
   hudSig = sig;
-
-  hud.innerHTML = "";
-  for (const p of players) {
-    const row = document.createElement("div");
-    row.className = "hudrow" + (p.alive ? "" : " dead") + (p.id === youId ? " you" : "");
-    const sw = document.createElement("span");
-    sw.className = "sw";
-    sw.style.background = p.color;
-    const nm = document.createElement("span");
-    nm.className = "nm";
-    nm.textContent = (p.isHost ? "★ " : "") + p.name;
-    const icons = document.createElement("span");
-    icons.className = "icons";
-    icons.innerHTML =
-      icon("bomb").repeat(p.bombs) + icon("flame").repeat(p.flame) + icon("speed").repeat(p.speed);
-    row.append(sw, nm, icons);
-    hud.append(row);
-  }
+  hud.innerHTML =
+    icon("bomb").repeat(me.bombs) + icon("flame").repeat(me.flame) + icon("speed").repeat(me.speed);
 }
 
-// ---- overlay (countdown / waiting / results) ----
-function renderOverlay(snap: SnapshotMsg): void {
-  const me = snap.players.find((p) => p.id === youId);
-  const isHost = !!me?.isHost;
-  let html = "";
+// ---- scoreboard ----
+function renderScoreboard(players: PlayerState[]): void {
+  const sorted = [...players].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
+  const sig = sorted.map((p) => `${p.id}:${p.name}:${p.kills}:${p.deaths}`).join("|");
+  if (sig === boardSig) return;
+  boardSig = sig;
 
-  if (snap.phase === "waiting") {
-    html = isHost
-      ? `<div class="ov-msg">You're the host. Press <b>Start</b> when ready.</div>`
-      : `<div class="ov-msg">Waiting for the host to start…</div>`;
-  } else if (snap.phase === "countdown") {
-    html = `<div class="ov-count">${snap.countdown}</div>`;
-  } else if (snap.phase === "results") {
-    const who = snap.winnerName ? `${esc(snap.winnerName)} wins!` : "Draw!";
-    html = `<div class="ov-msg"><div class="ov-win">${who}</div>${
-      isHost ? "Starting again — or press Start." : "Next round soon…"
-    }</div>`;
+  scoreboard.innerHTML = `<div class="sb-head">${players.length} online</div>`;
+  for (const p of sorted.slice(0, 12)) {
+    const row = document.createElement("div");
+    row.className = "sb-row" + (p.id === youId ? " you" : "");
+    row.innerHTML =
+      `<span class="sw" style="background:${p.color}"></span>` +
+      `<span class="sb-name">${esc(p.name)}</span>` +
+      `<span class="sb-kd">${p.kills}/${p.deaths}</span>`;
+    scoreboard.append(row);
   }
-  overlay.innerHTML = html;
-  overlay.style.display = snap.phase === "playing" ? "none" : "flex";
-
-  // start button: host only, when a round isn't running
-  const canStart = isHost && (snap.phase === "waiting" || snap.phase === "results");
-  startBtn.hidden = !canStart;
-  startBtn.classList.toggle("pulse", canStart && snap.players.length >= 2);
 }
 
 function esc(s: string): string {
@@ -224,12 +182,25 @@ function esc(s: string): string {
   return d.innerHTML;
 }
 
+// ---- status (respawn notice) ----
+function renderStatus(me: PlayerState | undefined): void {
+  if (me && !me.alive) {
+    status.textContent = "💥 You were blasted — respawning…";
+    status.hidden = false;
+  } else {
+    status.hidden = true;
+  }
+}
+
 // ---- render loop ----
 function frame(): void {
-  if (latest && !game.hidden) {
-    render(cctx, latest, TILE);
-    renderHud(latest.players);
-    renderOverlay(latest);
+  if (latest && !gameView.hidden) {
+    const me = latest.players.find((p) => p.id === youId);
+    updateCamera(me);
+    drawWorld(cctx, latest, cachedMap, { x: cam.x, y: cam.y, vw: canvas.width, vh: canvas.height });
+    renderHud(me);
+    renderScoreboard(latest.players);
+    renderStatus(me);
   }
   requestAnimationFrame(frame);
 }

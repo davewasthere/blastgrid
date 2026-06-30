@@ -1,4 +1,12 @@
-import { TILE_CRATE, TILE_WALL, type Dir } from "../shared/constants.js";
+import {
+  BOMB_FUSE_TICKS,
+  TICK_RATE,
+  TILE,
+  TILE_CRATE,
+  TILE_WALL,
+  type Dir,
+  type Tile,
+} from "../shared/constants.js";
 import type { SnapshotMsg } from "../shared/types.js";
 
 const DIR_OFFSET: Record<Dir, { x: number; y: number }> = {
@@ -18,93 +26,97 @@ const eyeStates = new Map<string, EyeState>();
 function hashSeed(id: string): number {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 997;
-  return (h / 997) * 4; // 0..4s stagger
+  return (h / 997) * 4;
 }
 
-export function render(
+export interface Camera {
+  x: number;
+  y: number;
+  vw: number;
+  vh: number;
+}
+
+// Draws the visible window of the world. The whole world is rendered in
+// world-pixel space under a camera translate; only the visible tile range is
+// iterated so a large map stays cheap.
+export function drawWorld(
   c: CanvasRenderingContext2D,
   snap: SnapshotMsg,
-  ts: number,
+  map: Tile[] | null,
+  cam: Camera,
 ): void {
   const time = performance.now() / 1000;
-  const w = snap.width * ts;
-  const h = snap.height * ts;
 
-  // floor
-  c.fillStyle = "#1b2230";
-  c.fillRect(0, 0, w, h);
-  c.fillStyle = "#202a3c";
-  for (let y = 0; y < snap.height; y++) {
-    for (let x = 0; x < snap.width; x++) {
-      if ((x + y) % 2 === 0) c.fillRect(x * ts, y * ts, ts, ts);
+  // backdrop (screen space)
+  c.fillStyle = "#0c111c";
+  c.fillRect(0, 0, cam.vw, cam.vh);
+  if (!map) return;
+
+  c.save();
+  c.translate(-cam.x, -cam.y);
+
+  const sx0 = Math.max(0, Math.floor(cam.x / TILE));
+  const sy0 = Math.max(0, Math.floor(cam.y / TILE));
+  const sx1 = Math.min(snap.worldW - 1, Math.ceil((cam.x + cam.vw) / TILE));
+  const sy1 = Math.min(snap.worldH - 1, Math.ceil((cam.y + cam.vh) / TILE));
+
+  for (let y = sy0; y <= sy1; y++) {
+    for (let x = sx0; x <= sx1; x++) {
+      const px = x * TILE;
+      const py = y * TILE;
+      // floor
+      c.fillStyle = (x + y) % 2 === 0 ? "#1b2230" : "#202a3c";
+      c.fillRect(px, py, TILE, TILE);
+      const t = map[y * snap.worldW + x];
+      if (t === TILE_WALL) drawWall(c, px, py);
+      else if (t === TILE_CRATE) drawCrate(c, px, py);
     }
   }
 
-  // walls & crates
-  for (let y = 0; y < snap.height; y++) {
-    for (let x = 0; x < snap.width; x++) {
-      const t = snap.map[y * snap.width + x];
-      if (t === TILE_WALL) drawWall(c, x * ts, y * ts, ts);
-      else if (t === TILE_CRATE) drawCrate(c, x * ts, y * ts, ts);
-    }
-  }
+  for (const pu of snap.powerups) drawPowerup(c, pu.x, pu.y, pu.kind, time);
+  for (const b of snap.bombs) drawBomb(c, b.x, b.y, b.fuse);
+  for (const e of snap.explosions) drawFlame(c, e.x, e.y, e.life / e.maxLife, time);
+  for (const p of snap.players) if (p.alive) drawPlayer(c, p, time);
+  for (const p of snap.players) if (p.alive) drawName(c, p.name, p.x * TILE + TILE / 2, p.y * TILE);
 
-  for (const pu of snap.powerups) drawPowerup(c, pu.x, pu.y, pu.kind, ts, time);
-  for (const b of snap.bombs) drawBomb(c, b.x, b.y, b.fuse, ts, time);
-  for (const e of snap.explosions) drawFlame(c, e.x, e.y, e.life / e.maxLife, ts, time);
-
-  for (const p of snap.players) {
-    if (!p.alive) continue;
-    drawPlayer(c, p, ts, time);
-  }
-  // names on top so blobs don't cover them
-  for (const p of snap.players) {
-    if (!p.alive) continue;
-    drawName(c, p.name, p.x * ts + ts / 2, p.y * ts);
-  }
+  c.restore();
 }
 
-function drawWall(c: CanvasRenderingContext2D, x: number, y: number, ts: number): void {
+function drawWall(c: CanvasRenderingContext2D, x: number, y: number): void {
   c.fillStyle = "#3a4663";
-  c.fillRect(x, y, ts, ts);
+  c.fillRect(x, y, TILE, TILE);
   c.fillStyle = "#4a587b";
-  c.fillRect(x + 2, y + 2, ts - 4, ts - 6);
+  c.fillRect(x + 2, y + 2, TILE - 4, TILE - 6);
   c.fillStyle = "#2c3650";
-  c.fillRect(x + 2, y + ts - 6, ts - 4, 4);
+  c.fillRect(x + 2, y + TILE - 6, TILE - 4, 4);
 }
 
-function drawCrate(c: CanvasRenderingContext2D, x: number, y: number, ts: number): void {
+function drawCrate(c: CanvasRenderingContext2D, x: number, y: number): void {
   c.fillStyle = "#8a5a2b";
-  c.fillRect(x + 1, y + 1, ts - 2, ts - 2);
+  c.fillRect(x + 1, y + 1, TILE - 2, TILE - 2);
   c.fillStyle = "#a86c34";
-  c.fillRect(x + 4, y + 4, ts - 8, ts - 8);
+  c.fillRect(x + 4, y + 4, TILE - 8, TILE - 8);
   c.strokeStyle = "#6b441f";
   c.lineWidth = 2;
-  c.strokeRect(x + 4, y + 4, ts - 8, ts - 8);
+  c.strokeRect(x + 4, y + 4, TILE - 8, TILE - 8);
   c.beginPath();
   c.moveTo(x + 4, y + 4);
-  c.lineTo(x + ts - 4, y + ts - 4);
-  c.moveTo(x + ts - 4, y + 4);
-  c.lineTo(x + 4, y + ts - 4);
+  c.lineTo(x + TILE - 4, y + TILE - 4);
+  c.moveTo(x + TILE - 4, y + 4);
+  c.lineTo(x + 4, y + TILE - 4);
   c.stroke();
 }
 
-function drawBomb(
-  c: CanvasRenderingContext2D,
-  gx: number,
-  gy: number,
-  fuse: number,
-  ts: number,
-  time: number,
-): void {
-  const cx = gx * ts + ts / 2;
-  const cy = gy * ts + ts / 2;
-  // throb faster as the fuse runs down
-  const speed = 6 + (1 - Math.min(fuse, 90) / 90) * 10;
-  const pulse = 0.5 + 0.5 * Math.sin(time * speed);
-  const r = ts * 0.30 + pulse * ts * 0.06;
+function drawBomb(c: CanvasRenderingContext2D, gx: number, gy: number, fuse: number): void {
+  const cx = gx * TILE + TILE / 2;
+  const cy = gy * TILE + TILE / 2;
+  // Throb is anchored to the bomb's OWN fuse, not wall-clock time, so every
+  // bomb pulses identically from placement and accelerates toward detonation.
+  const elapsed = Math.max(0, BOMB_FUSE_TICKS - fuse) / TICK_RATE; // seconds since placed
+  const cycles = 1.2 * elapsed + 0.8 * elapsed * elapsed; // frequency ramps up over time
+  const pulse = 0.5 + 0.5 * Math.sin(2 * Math.PI * cycles);
+  const r = TILE * 0.3 + pulse * TILE * 0.06;
 
-  // glow
   const glow = c.createRadialGradient(cx, cy, r * 0.4, cx, cy, r * 2);
   glow.addColorStop(0, `rgba(255,170,40,${0.35 + pulse * 0.3})`);
   glow.addColorStop(1, "rgba(255,170,40,0)");
@@ -113,13 +125,11 @@ function drawBomb(
   c.arc(cx, cy, r * 2, 0, Math.PI * 2);
   c.fill();
 
-  // shadow
   c.fillStyle = "rgba(0,0,0,0.35)";
   c.beginPath();
   c.ellipse(cx, cy + r * 0.85, r * 0.9, r * 0.35, 0, 0, Math.PI * 2);
   c.fill();
 
-  // body, yellow/orange with strong contrast
   const body = c.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.2, cx, cy, r);
   body.addColorStop(0, "#ffe06a");
   body.addColorStop(0.6, "#ff9a2e");
@@ -132,7 +142,6 @@ function drawBomb(
   c.strokeStyle = "#3a1402";
   c.stroke();
 
-  // red highlight + spark
   c.fillStyle = `rgba(255,60,40,${0.5 + pulse * 0.5})`;
   c.beginPath();
   c.arc(cx + r * 0.25, cy + r * 0.2, r * 0.22, 0, Math.PI * 2);
@@ -141,7 +150,6 @@ function drawBomb(
   c.beginPath();
   c.arc(cx - r * 0.3, cy - r * 0.35, r * 0.18, 0, Math.PI * 2);
   c.fill();
-  // fuse
   c.strokeStyle = "#caa";
   c.lineWidth = 2;
   c.beginPath();
@@ -150,58 +158,35 @@ function drawBomb(
   c.stroke();
 }
 
-function drawFlame(
-  c: CanvasRenderingContext2D,
-  gx: number,
-  gy: number,
-  frac: number,
-  ts: number,
-  time: number,
-): void {
-  const x = gx * ts;
-  const y = gy * ts;
+function drawFlame(c: CanvasRenderingContext2D, gx: number, gy: number, frac: number, time: number): void {
+  const x = gx * TILE;
+  const y = gy * TILE;
   const a = Math.max(0, Math.min(1, frac));
   const flick = 0.85 + 0.15 * Math.sin(time * 25 + gx + gy);
   c.save();
   c.globalAlpha = a;
-  const g = c.createRadialGradient(
-    x + ts / 2,
-    y + ts / 2,
-    2,
-    x + ts / 2,
-    y + ts / 2,
-    ts * 0.7 * flick,
-  );
+  const g = c.createRadialGradient(x + TILE / 2, y + TILE / 2, 2, x + TILE / 2, y + TILE / 2, TILE * 0.7 * flick);
   g.addColorStop(0, "#fff3b0");
   g.addColorStop(0.4, "#ffae33");
   g.addColorStop(0.8, "#ff5a1f");
   g.addColorStop(1, "rgba(255,60,20,0)");
   c.fillStyle = g;
-  c.fillRect(x, y, ts, ts);
+  c.fillRect(x, y, TILE, TILE);
   c.restore();
 }
 
-function drawPowerup(
-  c: CanvasRenderingContext2D,
-  gx: number,
-  gy: number,
-  kind: string,
-  ts: number,
-  time: number,
-): void {
-  const cx = gx * ts + ts / 2;
-  const cy = gy * ts + ts / 2;
-  const bob = Math.sin(time * 3 + gx + gy) * ts * 0.04;
-  const r = ts * 0.28;
+function drawPowerup(c: CanvasRenderingContext2D, gx: number, gy: number, kind: string, time: number): void {
+  const cx = gx * TILE + TILE / 2;
+  const cy = gy * TILE + TILE / 2;
+  const bob = Math.sin(time * 3 + gx + gy) * TILE * 0.04;
+  const r = TILE * 0.28;
   const color = kind === "bomb" ? "#4fc3f7" : kind === "flame" ? "#ff6b4a" : "#7ee06a";
 
-  // shadow
   c.fillStyle = "rgba(0,0,0,0.3)";
   c.beginPath();
   c.ellipse(cx, cy + r * 0.9, r * 0.8, r * 0.3, 0, 0, Math.PI * 2);
   c.fill();
 
-  // glowing body
   const body = c.createRadialGradient(cx - r * 0.3, cy - r * 0.3 + bob, r * 0.2, cx, cy + bob, r);
   body.addColorStop(0, "#ffffff");
   body.addColorStop(0.4, color);
@@ -214,13 +199,11 @@ function drawPowerup(
   c.strokeStyle = shade(color, -0.5);
   c.stroke();
 
-  // highlight spot
   c.fillStyle = "rgba(255,255,255,0.7)";
   c.beginPath();
   c.arc(cx - r * 0.35, cy - r * 0.4 + bob, r * 0.18, 0, Math.PI * 2);
   c.fill();
 
-  // tiny icon
   c.save();
   c.translate(cx, cy + bob);
   if (kind === "bomb") {
@@ -256,33 +239,25 @@ function drawPowerup(
   c.restore();
 }
 
-function drawPlayer(
-  c: CanvasRenderingContext2D,
-  p: SnapshotMsg["players"][number],
-  ts: number,
-  time: number,
-): void {
-  const cx = p.x * ts + ts / 2;
-  const cy = p.y * ts + ts / 2;
-  const r = ts * 0.36;
+function drawPlayer(c: CanvasRenderingContext2D, p: SnapshotMsg["players"][number], time: number): void {
+  const cx = p.x * TILE + TILE / 2;
+  const cy = p.y * TILE + TILE / 2;
+  const r = TILE * 0.36;
 
   let st = eyeStates.get(p.id);
   if (!st) {
     st = { ex: 0, ey: 0, seed: hashSeed(p.id) };
     eyeStates.set(p.id, st);
   }
-  // ease pupils toward the travel direction (or back to center when stopped)
   const target = p.moving ? DIR_OFFSET[p.dir] : { x: 0, y: 0 };
   st.ex += (target.x - st.ex) * 0.2;
   st.ey += (target.y - st.ey) * 0.2;
 
-  // shadow
   c.fillStyle = "rgba(0,0,0,0.3)";
   c.beginPath();
   c.ellipse(cx, cy + r * 0.85, r * 0.85, r * 0.3, 0, 0, Math.PI * 2);
   c.fill();
 
-  // blob body
   const body = c.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.2, cx, cy, r);
   body.addColorStop(0, shade(p.color, 0.35));
   body.addColorStop(0.7, p.color);
@@ -295,7 +270,6 @@ function drawPlayer(
   c.strokeStyle = shade(p.color, -0.5);
   c.stroke();
 
-  // eyes — blink occasionally, staggered per player
   const blinkT = (time + st.seed) % 3.6;
   const blinking = blinkT < 0.12;
   const eyeDX = r * 0.34;
@@ -330,7 +304,6 @@ function drawName(c: CanvasRenderingContext2D, name: string, cx: number, top: nu
   c.fillText(text, cx, top - 3);
 }
 
-// lighten (>0) or darken (<0) a hex color
 function shade(hex: string, amt: number): string {
   const n = parseInt(hex.slice(1), 16);
   let r = (n >> 16) & 255;
