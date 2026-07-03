@@ -11,6 +11,8 @@ import {
   DEFAULT_BOMBS,
   DEFAULT_FLAME,
   DEFAULT_SPEED,
+  ENEMY_MAX,
+  ENEMY_SPEED,
   FLAME_LETHAL_TICKS,
   FLAME_LIFETIME_TICKS,
   MAX_WORLD,
@@ -24,6 +26,7 @@ import {
   SCORE_STREAK_BONUS,
   SHRINK_INTERVAL_TICKS,
   SHRINK_SAFE_DIST,
+  SPAWN_IMMUNE_TICKS,
   STREAK_BONUS_MIN,
   SPEED_DROP_SHARE,
   SPEED_STEP,
@@ -38,6 +41,7 @@ import {
 } from "../shared/constants.js";
 import type {
   BombState,
+  EnemyState,
   ExplosionCell,
   PlayerState,
   PowerupState,
@@ -76,6 +80,24 @@ interface Player {
   streak: number;
   heldDir: Dir | null;
   bombHeld: boolean;
+  isBot: boolean;
+  botNextDecision: number;
+  botBombAt: number;
+  immuneUntil: number;
+  deathCause: "bomb" | "enemy" | null;
+}
+
+interface Enemy {
+  id: number;
+  gx: number;
+  gy: number;
+  ox: number;
+  oy: number;
+  tx: number;
+  ty: number;
+  progress: number;
+  moving: boolean;
+  flameImmuneUntil: number; // survive the blast that spawned it, then vulnerable
 }
 
 interface Bomb {
@@ -114,8 +136,11 @@ export class World {
   private bombs: Bomb[] = [];
   private explosions: Explosion[] = [];
   private powerups: Powerup[] = [];
+  private enemies: Enemy[] = [];
   private nextBombId = 1;
   private nextPowerupId = 1;
+  private nextEnemyId = 1;
+  private nextBotId = 1;
   private colorCursor = 0;
   private shrinkTimer = 0;
   private regenTimer = 0;
@@ -348,6 +373,7 @@ export class World {
     this.bombs = this.bombs.filter((b) => !outside(b.x, b.y));
     this.powerups = this.powerups.filter((pu) => !outside(pu.x, pu.y));
     this.explosions = this.explosions.filter((e) => !outside(e.x, e.y));
+    this.enemies = this.enemies.filter((e) => !outside(this.enemyTileX(e), this.enemyTileY(e)));
   }
 
   /** When everyone leaves, shrink back to the minimum for the next session. */
@@ -389,6 +415,11 @@ export class World {
       streak: 0,
       heldDir: null,
       bombHeld: false,
+      isBot: false,
+      botNextDecision: 0,
+      botBombAt: 0,
+      immuneUntil: this.tick + SPAWN_IMMUNE_TICKS,
+      deathCause: null,
     };
     // Register first so the world is sized for the new count, then place them.
     this.players.set(id, p);
@@ -396,6 +427,17 @@ export class World {
     const spawn = this.findSpawn();
     p.gx = p.ox = p.tx = spawn.x;
     p.gy = p.oy = p.ty = spawn.y;
+  }
+
+  /** Add an always-on, server-driven bot player. */
+  addBot(name: string): void {
+    const id = `bot${this.nextBotId++}`;
+    this.addPlayer(id, name);
+    const p = this.players.get(id);
+    if (p) {
+      p.isBot = true;
+      p.botBombAt = this.tick + Math.floor(Math.random() * 90); // stagger first bomb
+    }
   }
 
   setName(id: string, name: string): void {
@@ -458,6 +500,7 @@ export class World {
 
   step(): void {
     this.tick++;
+    this.stepBots(); // fill in bot inputs before movement
     for (const p of this.players.values()) {
       if (p.alive) this.movePlayer(p);
       else if (this.tick >= p.respawnAt) this.respawn(p);
@@ -469,7 +512,10 @@ export class World {
     // reach the snapshot at full life (lets clients detect a *fresh* blast).
     this.updateExplosions();
     this.updateBombs();
+    this.killEnemiesInFlame(); // blasts destroy chasers (except newborns)
+    this.stepEnemies(); // chasers hunt the nearest player
     this.checkDeaths();
+    this.checkEnemyContact(); // a chaser touching a player is lethal
 
     if (++this.shrinkTimer >= SHRINK_INTERVAL_TICKS) {
       this.shrinkTimer = 0;
@@ -495,6 +541,7 @@ export class World {
     p.bombs = DEFAULT_BOMBS;
     p.flame = DEFAULT_FLAME;
     p.speed = DEFAULT_SPEED;
+    p.immuneUntil = this.tick + SPAWN_IMMUNE_TICKS;
   }
 
   private moveSpeed(p: Player): number {
@@ -625,8 +672,12 @@ export class World {
   }
 
   private addFlame(x: number, y: number, ownerId: string): void {
+    // a powerup caught in the blast turns into a chaser enemy
     const pi = this.powerups.findIndex((pu) => pu.x === x && pu.y === y);
-    if (pi >= 0) this.powerups.splice(pi, 1);
+    if (pi >= 0) {
+      this.powerups.splice(pi, 1);
+      this.spawnEnemy(x, y);
+    }
     this.explosions.push({
       x,
       y,
@@ -658,29 +709,195 @@ export class World {
       const flame = this.explosions.find(
         (e) => e.x === px && e.y === py && e.maxLife - e.life < FLAME_LETHAL_TICKS,
       );
-      if (!flame) continue;
-      p.alive = false;
-      p.moving = false;
-      p.deaths++;
-      p.streak = 0; // dying ends your kill streak
-      p.respawnAt = this.tick + RESPAWN_TICKS;
-      p.bombs = DEFAULT_BOMBS;
-      p.flame = DEFAULT_FLAME;
-      p.speed = DEFAULT_SPEED;
-      // credit the kill to the bomb owner (unless it was a self-blast)
-      if (flame.ownerId !== p.id) {
-        const killer = this.players.get(flame.ownerId);
-        if (killer) {
-          killer.kills++;
-          killer.streak++;
-          killer.score += SCORE_KILL;
-          // rampage bonus, escalating with streak length (3->+1x, 4->+2x, ...)
-          if (killer.streak >= STREAK_BONUS_MIN) {
-            killer.score += SCORE_STREAK_BONUS * (killer.streak - (STREAK_BONUS_MIN - 1));
-          }
+      if (flame) this.killPlayer(p, flame.ownerId, "bomb");
+    }
+  }
+
+  /** Kill a player; credit the killer (a bomb owner) unless it was self/environmental. */
+  private killPlayer(p: Player, killerId: string | null, cause: "bomb" | "enemy"): void {
+    if (!p.alive || this.tick < p.immuneUntil) return; // spawn protection
+    p.alive = false;
+    p.moving = false;
+    p.deaths++;
+    p.deathCause = cause;
+    p.streak = 0; // dying ends your kill streak
+    p.respawnAt = this.tick + RESPAWN_TICKS;
+    p.bombs = DEFAULT_BOMBS;
+    p.flame = DEFAULT_FLAME;
+    p.speed = DEFAULT_SPEED;
+    if (killerId && killerId !== p.id) {
+      const killer = this.players.get(killerId);
+      if (killer) {
+        killer.kills++;
+        killer.streak++;
+        killer.score += SCORE_KILL;
+        // rampage bonus, escalating with streak length (3->+1x, 4->+2x, ...)
+        if (killer.streak >= STREAK_BONUS_MIN) {
+          killer.score += SCORE_STREAK_BONUS * (killer.streak - (STREAK_BONUS_MIN - 1));
         }
       }
     }
+  }
+
+  // ---- bots ----
+
+  private stepBots(): void {
+    for (const p of this.players.values()) {
+      if (!p.isBot || !p.alive) continue;
+
+      // wander: (re)pick a direction when idle and the timer's up or we're blocked
+      if (!p.moving) {
+        const opens = this.openDirs(p.gx, p.gy);
+        const blocked = !p.heldDir || !opens.includes(p.heldDir);
+        if (this.tick >= p.botNextDecision || blocked) {
+          p.heldDir = opens.length ? opens[Math.floor(Math.random() * opens.length)] : null;
+          p.botNextDecision = this.tick + 12 + Math.floor(Math.random() * 30);
+        }
+      }
+
+      // bomb occasionally, but only with a real escape lane, then flee
+      p.bombHeld = false;
+      if (this.tick >= p.botBombAt && !this.bombs.some((b) => b.ownerId === p.id)) {
+        const escape = this.escapeDir(p.gx, p.gy);
+        if (escape && (this.botNearTarget(p) || Math.random() < 0.5)) {
+          p.bombHeld = true;
+          p.heldDir = escape; // run away from the bomb
+          p.botNextDecision = this.tick + 45; // commit to fleeing for ~1.5s
+          p.botBombAt = this.tick + 90 + Math.floor(Math.random() * 90);
+        }
+      }
+    }
+  }
+
+  private openDirs(x: number, y: number): Dir[] {
+    return (Object.keys(DIR_VEC) as Dir[]).filter((d) =>
+      this.passable(x + DIR_VEC[d].dx, y + DIR_VEC[d].dy),
+    );
+  }
+
+  /** A direction with at least two open tiles ahead — a lane to flee a bomb down. */
+  private escapeDir(x: number, y: number): Dir | null {
+    for (const d of Object.keys(DIR_VEC) as Dir[]) {
+      const { dx, dy } = DIR_VEC[d];
+      if (this.passable(x + dx, y + dy) && this.passable(x + 2 * dx, y + 2 * dy)) return d;
+    }
+    return null;
+  }
+
+  private botNearTarget(p: Player): boolean {
+    for (const d of Object.keys(DIR_VEC) as Dir[]) {
+      const nx = p.gx + DIR_VEC[d].dx;
+      const ny = p.gy + DIR_VEC[d].dy;
+      if (nx >= 0 && ny >= 0 && nx < this.W && ny < this.H && this.map[this.idx(nx, ny)] === TILE_CRATE) {
+        return true;
+      }
+    }
+    for (const other of this.players.values()) {
+      if (other.id === p.id || !other.alive) continue;
+      if (Math.abs(this.tileX(other) - p.gx) + Math.abs(this.tileY(other) - p.gy) <= 1) return true;
+    }
+    return false;
+  }
+
+  // ---- chaser enemies ----
+
+  private spawnEnemy(x: number, y: number): void {
+    if (this.enemies.length >= ENEMY_MAX) return;
+    this.enemies.push({
+      id: this.nextEnemyId++,
+      gx: x,
+      gy: y,
+      ox: x,
+      oy: y,
+      tx: x,
+      ty: y,
+      progress: 0,
+      moving: false,
+      flameImmuneUntil: this.tick + SPAWN_IMMUNE_TICKS,
+    });
+  }
+
+  private enemyTileX(e: Enemy): number {
+    return Math.round(e.moving ? lerp(e.ox, e.tx, e.progress) : e.gx);
+  }
+  private enemyTileY(e: Enemy): number {
+    return Math.round(e.moving ? lerp(e.oy, e.ty, e.progress) : e.gy);
+  }
+
+  private enemyPassable(x: number, y: number): boolean {
+    return !this.isSolid(x, y) && !this.bombAt(x, y); // walls, crates and bombs block
+  }
+
+  private stepEnemies(): void {
+    for (const e of this.enemies) {
+      if (!e.moving) {
+        const target = this.nearestPlayer(e.gx, e.gy);
+        if (!target) continue;
+        let best: { x: number; y: number } | null = null;
+        let bestDist = Infinity;
+        for (const d of Object.keys(DIR_VEC) as Dir[]) {
+          const nx = e.gx + DIR_VEC[d].dx;
+          const ny = e.gy + DIR_VEC[d].dy;
+          if (!this.enemyPassable(nx, ny)) continue;
+          const dist = Math.abs(nx - target.x) + Math.abs(ny - target.y);
+          if (dist < bestDist) {
+            bestDist = dist;
+            best = { x: nx, y: ny };
+          }
+        }
+        if (!best) continue;
+        e.ox = e.gx;
+        e.oy = e.gy;
+        e.tx = best.x;
+        e.ty = best.y;
+        e.progress = 0;
+        e.moving = true;
+      }
+      e.progress += ENEMY_SPEED;
+      if (e.progress >= 1) {
+        e.gx = e.tx;
+        e.gy = e.ty;
+        e.progress = 0;
+        e.moving = false;
+      }
+    }
+  }
+
+  private nearestPlayer(x: number, y: number): { x: number; y: number } | null {
+    let best: { x: number; y: number } | null = null;
+    let bestDist = Infinity;
+    for (const p of this.players.values()) {
+      if (!p.alive) continue;
+      const px = this.tileX(p);
+      const py = this.tileY(p);
+      const dist = Math.abs(px - x) + Math.abs(py - y);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = { x: px, y: py };
+      }
+    }
+    return best;
+  }
+
+  private checkEnemyContact(): void {
+    for (const e of this.enemies) {
+      const ex = this.enemyTileX(e);
+      const ey = this.enemyTileY(e);
+      for (const p of this.players.values()) {
+        if (p.alive && this.tileX(p) === ex && this.tileY(p) === ey) this.killPlayer(p, null, "enemy");
+      }
+    }
+  }
+
+  private killEnemiesInFlame(): void {
+    this.enemies = this.enemies.filter((e) => {
+      if (this.tick < e.flameImmuneUntil) return true; // still surviving its birth blast
+      const ex = this.enemyTileX(e);
+      const ey = this.enemyTileY(e);
+      return !this.explosions.some(
+        (fl) => fl.x === ex && fl.y === ey && fl.maxLife - fl.life < FLAME_LETHAL_TICKS,
+      );
+    });
   }
 
   // ---- snapshot ----
@@ -706,6 +923,9 @@ export class World {
       deaths: p.deaths,
       score: p.score,
       streak: p.streak,
+      isBot: p.isBot,
+      immune: p.alive && this.tick < p.immuneUntil,
+      deathCause: p.deathCause,
     }));
   }
 
@@ -719,6 +939,14 @@ export class World {
 
   powerups_(): PowerupState[] {
     return this.powerups.map((pu) => ({ id: pu.id, x: pu.x, y: pu.y, kind: pu.kind }));
+  }
+
+  enemies_(): EnemyState[] {
+    return this.enemies.map((e) => ({
+      id: e.id,
+      x: e.moving ? lerp(e.ox, e.tx, e.progress) : e.gx,
+      y: e.moving ? lerp(e.oy, e.ty, e.progress) : e.gy,
+    }));
   }
 }
 

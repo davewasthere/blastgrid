@@ -127,6 +127,7 @@ canvas {
 .sb-rank { color: var(--muted); width: 16px; text-align: right; font-variant-numeric: tabular-nums; flex: 0 0 auto; }
 .sb-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .flame { font-size: 11px; }
+.bot { font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); border: 1px solid #3a4666; border-radius: 4px; padding: 0 3px; }
 .sb-score { color: var(--accent2); font-weight: 700; font-variant-numeric: tabular-nums; }
 .sb-row.you .sb-score { color: var(--accent); }
 .sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: 0 0 auto; }

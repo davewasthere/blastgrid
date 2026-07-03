@@ -177,10 +177,11 @@ function fillPanel(panel: HTMLElement, list: PlayerState[], startRank: number, t
     const onFire = p.streak >= STREAK_HIGHLIGHT;
     const row = document.createElement("div");
     row.className = "sb-row" + (p.id === youId ? " you" : "") + (onFire ? " fire" : "");
+    const botTag = p.isBot ? ` <span class="bot">bot</span>` : "";
     row.innerHTML =
       `<span class="sb-rank">${rank}</span>` +
       `<span class="sw" style="background:${p.color}"></span>` +
-      `<span class="sb-name">${esc(p.name)}${onFire ? ` <span class="flame">🔥${p.streak}</span>` : ""}</span>` +
+      `<span class="sb-name">${esc(p.name)}${botTag}${onFire ? ` <span class="flame">🔥${p.streak}</span>` : ""}</span>` +
       `<span class="sb-score">${p.score}</span>`;
     row.title = `${p.kills} kills / ${p.deaths} deaths`;
     panel.append(row);
@@ -196,7 +197,10 @@ function esc(s: string): string {
 // ---- status (respawn notice) ----
 function renderStatus(me: PlayerState | undefined): void {
   if (me && !me.alive) {
-    status.textContent = "💥 You were blasted — respawning…";
+    status.textContent =
+      me.deathCause === "enemy"
+        ? "☠️ A chaser caught you — respawning…"
+        : "💥 You were blasted — respawning…";
     status.hidden = false;
   } else {
     status.hidden = true;

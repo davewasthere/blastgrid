@@ -57,6 +57,17 @@ export const SCORE_STREAK_BONUS = 25; // extra per kill while on a streak, scali
 
 // Respawn
 export const RESPAWN_TICKS = TICK_RATE * 3; // dead for 3s, then respawn
+export const SPAWN_IMMUNE_TICKS = TICK_RATE * 3; // invulnerable for 3s after spawning
+
+// Bots: server-driven players that are always present. Count is env-overridable
+// (BOT_COUNT) in the server; this is the default.
+export const BOT_COUNT = 2;
+
+// Chaser enemies: a powerup blown up by an explosion becomes a slow dark block
+// that hunts the nearest player. Blocked by bombs/walls; kills on contact;
+// destroyed if caught in a blast.
+export const ENEMY_SPEED = 0.07; // tiles/tick — slower than a player's 0.16
+export const ENEMY_MAX = 24; // safety cap on simultaneous chasers
 
 // Crate fill: probability an interior (non-pillar) tile starts as a crate.
 export const CRATE_FILL_CHANCE = 0.72;

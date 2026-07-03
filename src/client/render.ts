@@ -86,6 +86,7 @@ export function drawWorld(
   }
 
   for (const pu of snap.powerups) drawPowerup(c, pu.x, pu.y, pu.kind, time);
+  for (const en of snap.enemies) drawEnemy(c, en.x, en.y, time);
   for (const b of snap.bombs) drawBomb(c, b.x, b.y, b.fuse);
   for (const e of snap.explosions) drawFlame(c, e.x, e.y, e.life / e.maxLife, time);
   for (const p of snap.players) if (p.alive) drawPlayer(c, p, time);
@@ -216,6 +217,58 @@ function drawFlame(c: CanvasRenderingContext2D, gx: number, gy: number, frac: nu
   c.restore();
 }
 
+function drawEnemy(c: CanvasRenderingContext2D, gx: number, gy: number, time: number): void {
+  const cx = gx * TILE + TILE / 2;
+  const cy = gy * TILE + TILE / 2;
+  const wob = Math.sin(time * 5 + gx + gy) * TILE * 0.03;
+  const s = TILE * 0.34;
+
+  // menacing red glow
+  const glow = c.createRadialGradient(cx, cy, s * 0.4, cx, cy, s * 2);
+  glow.addColorStop(0, "rgba(220,30,40,0.4)");
+  glow.addColorStop(1, "rgba(220,30,40,0)");
+  c.fillStyle = glow;
+  c.beginPath();
+  c.arc(cx, cy, s * 2, 0, Math.PI * 2);
+  c.fill();
+
+  // dark block body with a slight wobble
+  c.save();
+  c.translate(cx, cy + wob);
+  c.fillStyle = "#160f1c";
+  roundRect(c, -s, -s, s * 2, s * 2, 4);
+  c.fill();
+  c.strokeStyle = "#3a1020";
+  c.lineWidth = 2;
+  roundRect(c, -s, -s, s * 2, s * 2, 4);
+  c.stroke();
+  // angry red eyes
+  c.fillStyle = "#ff3b2e";
+  c.beginPath();
+  c.moveTo(-s * 0.55, -s * 0.15);
+  c.lineTo(-s * 0.1, -s * 0.35);
+  c.lineTo(-s * 0.1, -s * 0.02);
+  c.closePath();
+  c.fill();
+  c.beginPath();
+  c.moveTo(s * 0.55, -s * 0.15);
+  c.lineTo(s * 0.1, -s * 0.35);
+  c.lineTo(s * 0.1, -s * 0.02);
+  c.closePath();
+  c.fill();
+  // jagged mouth
+  c.strokeStyle = "#ff3b2e";
+  c.lineWidth = 2;
+  c.beginPath();
+  c.moveTo(-s * 0.5, s * 0.4);
+  c.lineTo(-s * 0.2, s * 0.2);
+  c.lineTo(0, s * 0.4);
+  c.lineTo(s * 0.2, s * 0.2);
+  c.lineTo(s * 0.5, s * 0.4);
+  c.stroke();
+  c.restore();
+}
+
 function drawPowerup(c: CanvasRenderingContext2D, gx: number, gy: number, kind: string, time: number): void {
   const cx = gx * TILE + TILE / 2;
   const cy = gy * TILE + TILE / 2;
@@ -294,17 +347,21 @@ function drawPlayer(c: CanvasRenderingContext2D, p: SnapshotMsg["players"][numbe
   st.ex += (target.x - st.ex) * 0.2;
   st.ey += (target.y - st.ey) * 0.2;
 
-  // red rampage aura for players on a kill streak
+  // red rampage aura for players on a kill streak — solid, only a faint shimmer
   if (p.streak >= STREAK_BONUS_MIN) {
-    const pulse = 0.6 + 0.4 * Math.sin(time * 6);
-    const aura = c.createRadialGradient(cx, cy, r * 0.6, cx, cy, r * 2);
-    aura.addColorStop(0, `rgba(255,45,30,${0.55 * pulse})`);
+    const shimmer = 0.95 + 0.05 * Math.sin(time * 3);
+    const aura = c.createRadialGradient(cx, cy, r * 0.6, cx, cy, r * 1.7);
+    aura.addColorStop(0, `rgba(255,45,30,${0.9 * shimmer})`);
+    aura.addColorStop(0.65, `rgba(255,45,30,${0.75 * shimmer})`);
     aura.addColorStop(1, "rgba(255,45,30,0)");
     c.fillStyle = aura;
     c.beginPath();
-    c.arc(cx, cy, r * 2, 0, Math.PI * 2);
+    c.arc(cx, cy, r * 1.7, 0, Math.PI * 2);
     c.fill();
   }
+
+  // spawn protection: draw the blob translucent
+  if (p.immune) c.globalAlpha = 0.45;
 
   c.fillStyle = "rgba(0,0,0,0.3)";
   c.beginPath();
@@ -342,6 +399,16 @@ function drawPlayer(c: CanvasRenderingContext2D, p: SnapshotMsg["players"][numbe
       c.arc(x + st.ex * eyeR * 0.9, eyeY + st.ey * eyeR * 0.9, eyeR * 0.55, 0, Math.PI * 2);
       c.fill();
     }
+  }
+
+  // spawn-protection shield ring (drawn at full opacity)
+  if (p.immune) {
+    c.globalAlpha = 1;
+    c.strokeStyle = `rgba(140,210,255,${0.5 + 0.3 * Math.sin(time * 6)})`;
+    c.lineWidth = 2;
+    c.beginPath();
+    c.arc(cx, cy, r * 1.25, 0, Math.PI * 2);
+    c.stroke();
   }
 }
 

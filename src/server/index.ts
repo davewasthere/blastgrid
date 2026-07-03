@@ -3,13 +3,14 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, extname, join, normalize } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
-import { MAX_PLAYERS, TICK_RATE } from "../shared/constants.js";
+import { BOT_COUNT, MAX_PLAYERS, TICK_RATE } from "../shared/constants.js";
 import type { ClientMsg, PlayerState, ServerMsg } from "../shared/types.js";
 import { World } from "./world.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, "public");
 const PORT = Number(process.env.PORT ?? 3000);
+const BOTS = Number(process.env.BOT_COUNT ?? BOT_COUNT);
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -43,6 +44,10 @@ const httpServer = createServer(async (req, res) => {
 // ---- websocket / single shared world ----
 const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
 const world = new World();
+
+// always-on bots so there's someone to play against
+const BOT_NAMES = ["Botly", "Zap-9", "Krunch", "Fuse", "Nimbus", "Ember", "Volt", "Pixl"];
+for (let i = 0; i < BOTS; i++) world.addBot(BOT_NAMES[i % BOT_NAMES.length]);
 
 interface Conn {
   id: string;
@@ -131,6 +136,7 @@ setInterval(() => {
   const bombs = world.bombs_();
   const explosions = world.explosions_();
   const powerups = world.powerups_();
+  const enemies = world.enemies_();
   const version = world.mapVersion;
   let mapJson: string | null = null; // serialize the (large) map at most once per tick
 
@@ -148,7 +154,8 @@ setInterval(() => {
       `{"type":"snapshot","tick":${world.tick},"worldW":${world.W},"worldH":${world.H},` +
         `"mapVersion":${version},"map":${map},` +
         `"players":${JSON.stringify(players)},"bombs":${JSON.stringify(bombs)},` +
-        `"explosions":${JSON.stringify(explosions)},"powerups":${JSON.stringify(powerups)}}`,
+        `"explosions":${JSON.stringify(explosions)},"powerups":${JSON.stringify(powerups)},` +
+        `"enemies":${JSON.stringify(enemies)}}`,
     );
   }
 }, 8);

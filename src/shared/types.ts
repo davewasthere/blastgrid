@@ -47,6 +47,15 @@ export interface PlayerState {
   deaths: number;
   score: number;
   streak: number; // current kill streak (0 when just died)
+  isBot: boolean;
+  immune: boolean; // spawn protection active
+  deathCause: "bomb" | "enemy" | null; // how they last died (for the death notice)
+}
+
+export interface EnemyState {
+  id: number;
+  x: number;
+  y: number;
 }
 
 export interface BombState {
@@ -84,6 +93,7 @@ export interface SnapshotMsg {
   bombs: BombState[];
   explosions: ExplosionCell[];
   powerups: PowerupState[];
+  enemies: EnemyState[];
 }
 
 export type ServerMsg = WelcomeMsg | ErrorMsg | SnapshotMsg;
