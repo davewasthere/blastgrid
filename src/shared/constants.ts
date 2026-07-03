@@ -13,7 +13,10 @@ export const MAX_PLAYERS = 100;
 // warrants — one wall (side) at a time, every this-many ticks, and only a wall
 // with no living player within SHRINK_SAFE_DIST tiles of it.
 export const SHRINK_INTERVAL_TICKS = TICK_RATE * 2;
-export const SHRINK_SAFE_DIST = 10; // keep this many clear tiles before closing a wall
+// A wall only closes if the nearest player is at least this many tiles away.
+// Kept larger than the on-screen view radius (~9.5 tiles) so the one-tile
+// "hop" as a wall closes always happens off-screen — nobody sees it move.
+export const SHRINK_SAFE_DIST = 12;
 
 // Client viewport (in tiles). The world can be far larger; the camera windows
 // it and follows the player.

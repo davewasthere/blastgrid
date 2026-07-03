@@ -50,7 +50,7 @@ const DIR_VEC: Record<Dir, { dx: number; dy: number }> = {
   right: { dx: 1, dy: 0 },
 };
 
-type Side = "right" | "left" | "bottom" | "top";
+type Side = "right" | "bottom";
 
 interface Player {
   id: string;
@@ -215,42 +215,26 @@ export class World {
 
   // ---- gradual shrink toward the player-count target ----
 
-  /** Called on a timer from step(). Closes in ONE wall per tick — the emptiest
-   *  side that still needs to shrink and has no player within SHRINK_SAFE_DIST of
-   *  it. Crates are never cleared; only the indestructible pillars on the very
-   *  outer ring are trimmed so the closing edge doesn't become a choppy line of
-   *  pillars (boxes-with-gaps). */
+  /** Called on a timer from step(). Closes in ONE wall per tick — from the right
+   *  or bottom only (the same directions the world grows), so no coordinate shift
+   *  is ever needed and the resize stays smooth. Only closes a wall with no living
+   *  player within SHRINK_SAFE_DIST of it. Crates are never cleared; only the
+   *  pillars on the outer ring are trimmed so the closing edge isn't a choppy
+   *  line of pillars (boxes-with-gaps). */
   private maybeShrink(): void {
     const target = this.targetSide();
     const cands: { side: Side; clearance: number }[] = [];
-    if (this.W > target) {
-      cands.push({ side: "right", clearance: this.edgeClearance("right") });
-      cands.push({ side: "left", clearance: this.edgeClearance("left") });
-    }
-    if (this.H > target) {
-      cands.push({ side: "bottom", clearance: this.edgeClearance("bottom") });
-      cands.push({ side: "top", clearance: this.edgeClearance("top") });
-    }
-    // only sides where nobody is within SHRINK_SAFE_DIST of that wall
+    if (this.W > target) cands.push({ side: "right", clearance: this.edgeClearance("right") });
+    if (this.H > target) cands.push({ side: "bottom", clearance: this.edgeClearance("bottom") });
+
+    // only walls where nobody is within SHRINK_SAFE_DIST
     const eligible = cands.filter((c) => c.clearance >= SHRINK_SAFE_DIST);
     if (eligible.length === 0) return;
 
-    // close in the emptiest eligible wall, one ring
+    // close in the emptier eligible wall, one ring
     eligible.sort((a, b) => b.clearance - a.clearance);
-    switch (eligible[0].side) {
-      case "right":
-        this.shrinkRight();
-        break;
-      case "left":
-        this.shrinkLeft();
-        break;
-      case "bottom":
-        this.shrinkBottom();
-        break;
-      case "top":
-        this.shrinkTop();
-        break;
-    }
+    if (eligible[0].side === "right") this.shrinkRight();
+    else this.shrinkBottom();
     this.trimPerimeterPillars();
     this.mapVersion++;
   }
@@ -261,13 +245,7 @@ export class World {
     let min = Infinity;
     for (const p of this.players.values()) {
       if (!p.alive) continue;
-      const px = this.tileX(p);
-      const py = this.tileY(p);
-      const d =
-        side === "right" ? this.W - 2 - px
-        : side === "left" ? px - 1
-        : side === "bottom" ? this.H - 2 - py
-        : py - 1;
+      const d = side === "right" ? this.W - 2 - this.tileX(p) : this.H - 2 - this.tileY(p);
       if (d < min) min = d;
     }
     return min;
@@ -362,58 +340,6 @@ export class World {
     this.H = newH;
     this.map = next;
     this.cullOutside();
-  }
-
-  private shrinkLeft(): void {
-    const oldW = this.W;
-    const newW = oldW - 1;
-    const next: Tile[] = new Array(newW * this.H);
-    for (let y = 0; y < this.H; y++) {
-      for (let nx = 0; nx < newW; nx++) {
-        next[y * newW + nx] = nx === 0 ? TILE_WALL : this.map[y * oldW + (nx + 1)];
-      }
-    }
-    this.W = newW;
-    this.map = next;
-    this.shiftEntities(-1, 0); // everything moves inward; visually nothing jumps
-    this.cullOutside();
-  }
-
-  private shrinkTop(): void {
-    const newH = this.H - 1;
-    const next: Tile[] = new Array(this.W * newH);
-    for (let y = 0; y < newH; y++) {
-      for (let x = 0; x < this.W; x++) {
-        next[y * this.W + x] = y === 0 ? TILE_WALL : this.map[(y + 1) * this.W + x];
-      }
-    }
-    this.H = newH;
-    this.map = next;
-    this.shiftEntities(0, -1);
-    this.cullOutside();
-  }
-
-  private shiftEntities(dx: number, dy: number): void {
-    for (const p of this.players.values()) {
-      p.gx += dx;
-      p.ox += dx;
-      p.tx += dx;
-      p.gy += dy;
-      p.oy += dy;
-      p.ty += dy;
-    }
-    for (const b of this.bombs) {
-      b.x += dx;
-      b.y += dy;
-    }
-    for (const pu of this.powerups) {
-      pu.x += dx;
-      pu.y += dy;
-    }
-    for (const e of this.explosions) {
-      e.x += dx;
-      e.y += dy;
-    }
   }
 
   /** Drop bombs/powerups/explosions that ended up on or outside the new border. */
