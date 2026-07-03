@@ -10,9 +10,10 @@ export const MAX_WORLD = 81; // comfortably holds ~100 players
 export const WORLD_STEP = 2; // world side grows by this per extra player
 export const MAX_PLAYERS = 100;
 // As players leave, the world shrinks back toward the size the current count
-// warrants — one ring at a time, every this-many ticks, only from a side with
-// no players on its outer row/column.
+// warrants — one wall (side) at a time, every this-many ticks, and only a wall
+// with no living player within SHRINK_SAFE_DIST tiles of it.
 export const SHRINK_INTERVAL_TICKS = TICK_RATE * 2;
+export const SHRINK_SAFE_DIST = 10; // keep this many clear tiles before closing a wall
 
 // Client viewport (in tiles). The world can be far larger; the camera windows
 // it and follows the player.

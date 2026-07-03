@@ -23,6 +23,7 @@ import {
   SCORE_POWERUP,
   SCORE_STREAK_BONUS,
   SHRINK_INTERVAL_TICKS,
+  SHRINK_SAFE_DIST,
   STREAK_BONUS_MIN,
   SPEED_DROP_SHARE,
   SPEED_STEP,
@@ -48,6 +49,8 @@ const DIR_VEC: Record<Dir, { dx: number; dy: number }> = {
   left: { dx: -1, dy: 0 },
   right: { dx: 1, dy: 0 },
 };
+
+type Side = "right" | "left" | "bottom" | "top";
 
 interface Player {
   id: string;
@@ -212,55 +215,79 @@ export class World {
 
   // ---- gradual shrink toward the player-count target ----
 
-  /** Called on a timer from step(). Shaves TWO rings from a side whose outer two
-   *  interior rows/columns hold no players, if the world is bigger than target.
-   *  Shrinking by two keeps the world odd-sized so the outermost interior ring
-   *  never lands on the (even,even) pillar lattice, and shifting left/top by two
-   *  preserves lattice alignment. The new perimeter is then carved into a clean
-   *  open hallway rather than a choppy line of pillars. */
+  /** Called on a timer from step(). Closes in ONE wall per tick — the emptiest
+   *  side that still needs to shrink and has no player within SHRINK_SAFE_DIST of
+   *  it. Crates are never cleared; only the indestructible pillars on the very
+   *  outer ring are trimmed so the closing edge doesn't become a choppy line of
+   *  pillars (boxes-with-gaps). */
   private maybeShrink(): void {
     const target = this.targetSide();
-    let changed = false;
-    // width: prefer the right, fall back to the left — whichever side's outer
-    // two columns are currently free of players.
+    const cands: { side: Side; clearance: number }[] = [];
     if (this.W > target) {
-      if (!this.playerTouchesCol(this.W - 2) && !this.playerTouchesCol(this.W - 3)) {
-        this.shrinkRight();
-        this.shrinkRight();
-        changed = true;
-      } else if (!this.playerTouchesCol(1) && !this.playerTouchesCol(2)) {
-        this.shrinkLeft();
-        this.shrinkLeft();
-        changed = true;
-      }
+      cands.push({ side: "right", clearance: this.edgeClearance("right") });
+      cands.push({ side: "left", clearance: this.edgeClearance("left") });
     }
-    // height: prefer the bottom, fall back to the top.
     if (this.H > target) {
-      if (!this.playerTouchesRow(this.H - 2) && !this.playerTouchesRow(this.H - 3)) {
-        this.shrinkBottom();
-        this.shrinkBottom();
-        changed = true;
-      } else if (!this.playerTouchesRow(1) && !this.playerTouchesRow(2)) {
-        this.shrinkTop();
-        this.shrinkTop();
-        changed = true;
-      }
+      cands.push({ side: "bottom", clearance: this.edgeClearance("bottom") });
+      cands.push({ side: "top", clearance: this.edgeClearance("top") });
     }
-    if (changed) {
-      this.carvePerimeter(); // keep the outer lane a clean, traversable hallway
-      this.mapVersion++;
+    // only sides where nobody is within SHRINK_SAFE_DIST of that wall
+    const eligible = cands.filter((c) => c.clearance >= SHRINK_SAFE_DIST);
+    if (eligible.length === 0) return;
+
+    // close in the emptiest eligible wall, one ring
+    eligible.sort((a, b) => b.clearance - a.clearance);
+    switch (eligible[0].side) {
+      case "right":
+        this.shrinkRight();
+        break;
+      case "left":
+        this.shrinkLeft();
+        break;
+      case "bottom":
+        this.shrinkBottom();
+        break;
+      case "top":
+        this.shrinkTop();
+        break;
     }
+    this.trimPerimeterPillars();
+    this.mapVersion++;
   }
 
-  /** Clear the interior ring just inside the border into an open corridor. */
-  private carvePerimeter(): void {
+  /** Perpendicular distance from the nearest living player to the given wall
+   *  (Infinity if nobody's around). */
+  private edgeClearance(side: Side): number {
+    let min = Infinity;
+    for (const p of this.players.values()) {
+      if (!p.alive) continue;
+      const px = this.tileX(p);
+      const py = this.tileY(p);
+      const d =
+        side === "right" ? this.W - 2 - px
+        : side === "left" ? px - 1
+        : side === "bottom" ? this.H - 2 - py
+        : py - 1;
+      if (d < min) min = d;
+    }
+    return min;
+  }
+
+  /** Convert only the pillars (walls) on the outer interior ring to empty,
+   *  leaving crates and floor untouched — keeps the closing edge tidy without
+   *  clearing the corridor of crates. */
+  private trimPerimeterPillars(): void {
+    const trim = (x: number, y: number) => {
+      const i = this.idx(x, y);
+      if (this.map[i] === TILE_WALL) this.map[i] = TILE_EMPTY;
+    };
     for (let x = 1; x <= this.W - 2; x++) {
-      this.map[this.idx(x, 1)] = TILE_EMPTY;
-      this.map[this.idx(x, this.H - 2)] = TILE_EMPTY;
+      trim(x, 1);
+      trim(x, this.H - 2);
     }
     for (let y = 1; y <= this.H - 2; y++) {
-      this.map[this.idx(1, y)] = TILE_EMPTY;
-      this.map[this.idx(this.W - 2, y)] = TILE_EMPTY;
+      trim(1, y);
+      trim(this.W - 2, y);
     }
   }
 
@@ -308,19 +335,6 @@ export class World {
       changed = true;
     }
     if (changed) this.mapVersion++;
-  }
-
-  private playerTouchesCol(c: number): boolean {
-    for (const p of this.players.values()) {
-      if (p.gx === c || (p.moving && p.tx === c) || this.tileX(p) === c) return true;
-    }
-    return false;
-  }
-  private playerTouchesRow(r: number): boolean {
-    for (const p of this.players.values()) {
-      if (p.gy === r || (p.moving && p.ty === r) || this.tileY(p) === r) return true;
-    }
-    return false;
   }
 
   private shrinkRight(): void {
