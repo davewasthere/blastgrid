@@ -45,9 +45,9 @@ const httpServer = createServer(async (req, res) => {
 const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
 const world = new World();
 
-// always-on bots so there's someone to play against
+// bots fill in only while there's a lone human (see world.syncBots)
 const BOT_NAMES = ["Botly", "Zap-9", "Krunch", "Fuse", "Nimbus", "Ember", "Volt", "Pixl"];
-for (let i = 0; i < BOTS; i++) world.addBot(BOT_NAMES[i % BOT_NAMES.length]);
+world.configureBots(BOTS, BOT_NAMES);
 
 interface Conn {
   id: string;
@@ -80,6 +80,7 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     if (conn.joined) world.removePlayer(conn.id);
     conns.delete(conn);
+    world.syncBots(); // dropping back to a lone human brings bots back
     world.resetIfEmpty();
   });
 });
@@ -103,6 +104,7 @@ function handle(conn: Conn, msg: ClientMsg): void {
       world.addPlayer(conn.id, name);
       conn.joined = true;
       conn.lastMapVersion = 0; // force a full map on the next snapshot
+      world.syncBots(); // a 2nd human clears the bots out
       send(conn.ws, { type: "welcome", youId: conn.id });
       break;
     }

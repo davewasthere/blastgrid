@@ -144,6 +144,8 @@ export class World {
   private colorCursor = 0;
   private shrinkTimer = 0;
   private regenTimer = 0;
+  private botTarget = 0;
+  private botNames: string[] = [];
 
   constructor() {
     this.map = freshMap(this.W, this.H);
@@ -430,13 +432,35 @@ export class World {
   }
 
   /** Add an always-on, server-driven bot player. */
-  addBot(name: string): void {
+  private addBot(name: string): void {
     const id = `bot${this.nextBotId++}`;
     this.addPlayer(id, name);
     const p = this.players.get(id);
     if (p) {
       p.isBot = true;
       p.botBombAt = this.tick + Math.floor(Math.random() * 90); // stagger first bomb
+    }
+  }
+
+  /** Configure the bot fill: how many bots to keep, and their name pool. */
+  configureBots(count: number, names: string[]): void {
+    this.botTarget = count;
+    this.botNames = names;
+    this.syncBots();
+  }
+
+  /** Keep bots around only while there's a lone human (0 or 1); remove them
+   *  once a second human joins, re-add them when it drops back. */
+  syncBots(): void {
+    const humans = [...this.players.values()].filter((p) => !p.isBot).length;
+    const bots = [...this.players.values()].filter((p) => p.isBot);
+    const want = humans <= 1 ? this.botTarget : 0;
+    if (bots.length < want) {
+      for (let i = bots.length; i < want; i++) {
+        this.addBot(this.botNames[i % this.botNames.length] ?? `Bot${i + 1}`);
+      }
+    } else {
+      for (let i = want; i < bots.length; i++) this.players.delete(bots[i].id);
     }
   }
 
