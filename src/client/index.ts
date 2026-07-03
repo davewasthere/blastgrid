@@ -1,5 +1,5 @@
 import { playExplosion, playPickup, unlockAudio } from "./audio.js";
-import { TILE, VIEW_H, VIEW_W, type Tile } from "../shared/constants.js";
+import { STREAK_HIGHLIGHT, TILE, VIEW_H, VIEW_W, type Tile } from "../shared/constants.js";
 import { InputTracker } from "./input.js";
 import { Net } from "./net.js";
 import { drawWorld } from "./render.js";
@@ -16,7 +16,8 @@ const joinBtn = $<HTMLButtonElement>("joinBtn");
 const enterError = $("enterError");
 const canvas = $<HTMLCanvasElement>("canvas");
 const hud = $("hud");
-const scoreboard = $("scoreboard");
+const scoreLeft = $("scoreLeft");
+const scoreRight = $("scoreRight");
 const status = $("status");
 const cctx = canvas.getContext("2d")!;
 
@@ -157,23 +158,33 @@ function renderHud(me: PlayerState | undefined): void {
     icon("bomb").repeat(me.bombs) + icon("flame").repeat(me.flame) + icon("speed").repeat(me.speed);
 }
 
-// ---- scoreboard ----
+// ---- scoreboard (ranked by score, split across the two side panels) ----
 function renderScoreboard(players: PlayerState[]): void {
-  const sorted = [...players].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths);
-  const sig = sorted.map((p) => `${p.id}:${p.name}:${p.kills}:${p.deaths}`).join("|");
+  const sorted = [...players].sort((a, b) => b.score - a.score || b.kills - a.kills);
+  const sig = sorted.map((p) => `${p.id}:${p.name}:${p.score}:${p.kills}:${p.deaths}:${p.streak}`).join("|");
   if (sig === boardSig) return;
   boardSig = sig;
 
-  scoreboard.innerHTML = `<div class="sb-head">${players.length} online</div>`;
-  for (const p of sorted.slice(0, 12)) {
+  const half = Math.ceil(sorted.length / 2);
+  fillPanel(scoreLeft, sorted.slice(0, half), 1, players.length);
+  fillPanel(scoreRight, sorted.slice(half), half + 1, null);
+}
+
+function fillPanel(panel: HTMLElement, list: PlayerState[], startRank: number, total: number | null): void {
+  panel.innerHTML = total !== null ? `<div class="sb-head">${total} online</div>` : `<div class="sb-head">&nbsp;</div>`;
+  list.forEach((p, i) => {
+    const rank = startRank + i;
+    const onFire = p.streak >= STREAK_HIGHLIGHT;
     const row = document.createElement("div");
-    row.className = "sb-row" + (p.id === youId ? " you" : "");
+    row.className = "sb-row" + (p.id === youId ? " you" : "") + (onFire ? " fire" : "");
     row.innerHTML =
+      `<span class="sb-rank">${rank}</span>` +
       `<span class="sw" style="background:${p.color}"></span>` +
-      `<span class="sb-name">${esc(p.name)}</span>` +
-      `<span class="sb-kd">${p.kills}/${p.deaths}</span>`;
-    scoreboard.append(row);
-  }
+      `<span class="sb-name">${esc(p.name)}${onFire ? ` <span class="flame">🔥${p.streak}</span>` : ""}</span>` +
+      `<span class="sb-score">${p.score}</span>`;
+    row.title = `${p.kills} kills / ${p.deaths} deaths`;
+    panel.append(row);
+  });
 }
 
 function esc(s: string): string {

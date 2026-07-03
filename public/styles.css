@@ -18,7 +18,7 @@ body {
 }
 
 #app {
-  max-width: 1000px;
+  max-width: 1160px;
   margin: 0 auto;
   padding: 20px 16px 40px;
 }
@@ -104,22 +104,31 @@ canvas {
   background: #0d1426;
 }
 
-#scoreboard {
-  width: 200px;
+.scoreboard {
+  width: 175px;
   flex: 0 0 auto;
   align-self: stretch;
   background: var(--panel-solid);
   border: 1px solid #2a3550;
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 10px 10px;
   font-size: 13px;
 }
-.sb-head { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
-.sb-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+.sb-head { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; min-height: 13px; }
+.sb-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: 6px;
+}
 .sb-row.you { color: var(--accent); font-weight: 700; }
+.sb-row.fire { background: linear-gradient(90deg, rgba(255,120,40,0.22), rgba(255,120,40,0)); }
+.sb-rank { color: var(--muted); width: 16px; text-align: right; font-variant-numeric: tabular-nums; flex: 0 0 auto; }
 .sb-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sb-kd { color: var(--muted); font-variant-numeric: tabular-nums; }
-.sb-row.you .sb-kd { color: var(--accent); }
+.flame { font-size: 11px; }
+.sb-score { color: var(--accent2); font-weight: 700; font-variant-numeric: tabular-nums; }
+.sb-row.you .sb-score { color: var(--accent); }
 .sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: 0 0 auto; }
 
 #status {

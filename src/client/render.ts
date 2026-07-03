@@ -1,5 +1,6 @@
 import {
   BOMB_FUSE_TICKS,
+  STREAK_BONUS_MIN,
   TICK_RATE,
   TILE,
   TILE_CRATE,
@@ -292,6 +293,18 @@ function drawPlayer(c: CanvasRenderingContext2D, p: SnapshotMsg["players"][numbe
   const target = p.moving ? DIR_OFFSET[p.dir] : { x: 0, y: 0 };
   st.ex += (target.x - st.ex) * 0.2;
   st.ey += (target.y - st.ey) * 0.2;
+
+  // red rampage aura for players on a kill streak
+  if (p.streak >= STREAK_BONUS_MIN) {
+    const pulse = 0.6 + 0.4 * Math.sin(time * 6);
+    const aura = c.createRadialGradient(cx, cy, r * 0.6, cx, cy, r * 2);
+    aura.addColorStop(0, `rgba(255,45,30,${0.55 * pulse})`);
+    aura.addColorStop(1, "rgba(255,45,30,0)");
+    c.fillStyle = aura;
+    c.beginPath();
+    c.arc(cx, cy, r * 2, 0, Math.PI * 2);
+    c.fill();
+  }
 
   c.fillStyle = "rgba(0,0,0,0.3)";
   c.beginPath();

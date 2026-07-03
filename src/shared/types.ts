@@ -45,6 +45,8 @@ export interface PlayerState {
   speed: number; // speed level
   kills: number;
   deaths: number;
+  score: number;
+  streak: number; // current kill streak (0 when just died)
 }
 
 export interface BombState {

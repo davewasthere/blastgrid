@@ -7,6 +7,13 @@
       "runtimeArgs": ["start"],
       "port": 3000,
       "autoPort": true
+    },
+    {
+      "name": "delta-v",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:\\Projects\\delta-v\\dist\\server.js"],
+      "port": 3001,
+      "autoPort": true
     }
   ]
 }

@@ -4,6 +4,10 @@ import {
   CHAIN_DELAY_TICKS,
   CRATE_FILL_CHANCE,
   CRATE_POWERUP_CHANCE,
+  CRATE_REGEN_BATCH,
+  CRATE_REGEN_INTERVAL_TICKS,
+  CRATE_REGEN_SAFE_RADIUS,
+  CRATE_TARGET_FRACTION,
   DEFAULT_BOMBS,
   DEFAULT_FLAME,
   DEFAULT_SPEED,
@@ -13,7 +17,13 @@ import {
   MIN_WORLD,
   PLAYER_COLORS,
   RESPAWN_TICKS,
+  SCORE_BOMB,
+  SCORE_CRATE,
+  SCORE_KILL,
+  SCORE_POWERUP,
+  SCORE_STREAK_BONUS,
   SHRINK_INTERVAL_TICKS,
+  STREAK_BONUS_MIN,
   SPEED_DROP_SHARE,
   SPEED_STEP,
   TILE_CRATE,
@@ -59,6 +69,8 @@ interface Player {
   speed: number;
   kills: number;
   deaths: number;
+  score: number;
+  streak: number;
   heldDir: Dir | null;
   bombHeld: boolean;
 }
@@ -103,6 +115,7 @@ export class World {
   private nextPowerupId = 1;
   private colorCursor = 0;
   private shrinkTimer = 0;
+  private regenTimer = 0;
 
   constructor() {
     this.map = freshMap(this.W, this.H);
@@ -199,31 +212,100 @@ export class World {
 
   // ---- gradual shrink toward the player-count target ----
 
-  /** Called on a timer from step(). Shaves one ring from a side whose outer
-   *  interior row/column holds no players, if the world is bigger than target. */
+  /** Called on a timer from step(). Shaves TWO rings from a side whose outer two
+   *  interior rows/columns hold no players, if the world is bigger than target.
+   *  Shrinking by two keeps the world odd-sized so the outermost interior ring
+   *  never lands on the (even,even) pillar lattice, and shifting left/top by two
+   *  preserves lattice alignment. The new perimeter is then carved into a clean
+   *  open hallway rather than a choppy line of pillars. */
   private maybeShrink(): void {
     const target = this.targetSide();
     let changed = false;
-    // width: prefer shaving the right, fall back to the left — whichever is
-    // currently free of players on its outer column.
+    // width: prefer the right, fall back to the left — whichever side's outer
+    // two columns are currently free of players.
     if (this.W > target) {
-      if (!this.playerTouchesCol(this.W - 2)) {
+      if (!this.playerTouchesCol(this.W - 2) && !this.playerTouchesCol(this.W - 3)) {
+        this.shrinkRight();
         this.shrinkRight();
         changed = true;
-      } else if (!this.playerTouchesCol(1)) {
+      } else if (!this.playerTouchesCol(1) && !this.playerTouchesCol(2)) {
+        this.shrinkLeft();
         this.shrinkLeft();
         changed = true;
       }
     }
     // height: prefer the bottom, fall back to the top.
     if (this.H > target) {
-      if (!this.playerTouchesRow(this.H - 2)) {
+      if (!this.playerTouchesRow(this.H - 2) && !this.playerTouchesRow(this.H - 3)) {
+        this.shrinkBottom();
         this.shrinkBottom();
         changed = true;
-      } else if (!this.playerTouchesRow(1)) {
+      } else if (!this.playerTouchesRow(1) && !this.playerTouchesRow(2)) {
+        this.shrinkTop();
         this.shrinkTop();
         changed = true;
       }
+    }
+    if (changed) {
+      this.carvePerimeter(); // keep the outer lane a clean, traversable hallway
+      this.mapVersion++;
+    }
+  }
+
+  /** Clear the interior ring just inside the border into an open corridor. */
+  private carvePerimeter(): void {
+    for (let x = 1; x <= this.W - 2; x++) {
+      this.map[this.idx(x, 1)] = TILE_EMPTY;
+      this.map[this.idx(x, this.H - 2)] = TILE_EMPTY;
+    }
+    for (let y = 1; y <= this.H - 2; y++) {
+      this.map[this.idx(1, y)] = TILE_EMPTY;
+      this.map[this.idx(this.W - 2, y)] = TILE_EMPTY;
+    }
+  }
+
+  /** Slowly grow crates back toward a target density so powerups keep flowing
+   *  and the arena never runs dry once everything's been blown up. */
+  private regenCrates(): void {
+    // survey the inner interior (excludes the perimeter hallway + pillars)
+    let crates = 0;
+    let open = 0;
+    for (let y = 2; y <= this.H - 3; y++) {
+      for (let x = 2; x <= this.W - 3; x++) {
+        if (x % 2 === 0 && y % 2 === 0) continue; // pillar
+        open++;
+        if (this.map[this.idx(x, y)] === TILE_CRATE) crates++;
+      }
+    }
+    const target = Math.floor(open * CRATE_TARGET_FRACTION);
+    let toAdd = Math.min(CRATE_REGEN_BATCH, target - crates);
+    if (toAdd <= 0) return;
+
+    let changed = false;
+    let attempts = 0;
+    while (toAdd > 0 && attempts++ < 80) {
+      const x = 2 + Math.floor(Math.random() * (this.W - 4));
+      const y = 2 + Math.floor(Math.random() * (this.H - 4));
+      if (x % 2 === 0 && y % 2 === 0) continue; // pillar
+      if (this.map[this.idx(x, y)] !== TILE_EMPTY) continue;
+      if (this.bombAt(x, y)) continue;
+      if (this.powerups.some((pu) => pu.x === x && pu.y === y)) continue;
+      // keep a clear buffer around living players so nobody gets boxed in
+      let nearPlayer = false;
+      for (const p of this.players.values()) {
+        if (!p.alive) continue;
+        if (
+          Math.abs(this.tileX(p) - x) <= CRATE_REGEN_SAFE_RADIUS &&
+          Math.abs(this.tileY(p) - y) <= CRATE_REGEN_SAFE_RADIUS
+        ) {
+          nearPlayer = true;
+          break;
+        }
+      }
+      if (nearPlayer) continue;
+      this.map[this.idx(x, y)] = TILE_CRATE;
+      toAdd--;
+      changed = true;
     }
     if (changed) this.mapVersion++;
   }
@@ -363,6 +445,8 @@ export class World {
       speed: DEFAULT_SPEED,
       kills: 0,
       deaths: 0,
+      score: 0,
+      streak: 0,
       heldDir: null,
       bombHeld: false,
     };
@@ -451,6 +535,10 @@ export class World {
       this.shrinkTimer = 0;
       this.maybeShrink();
     }
+    if (++this.regenTimer >= CRATE_REGEN_INTERVAL_TICKS) {
+      this.regenTimer = 0;
+      this.regenCrates();
+    }
   }
 
   private respawn(p: Player): void {
@@ -523,6 +611,7 @@ export class World {
     if (pu.kind === "bomb") p.bombs = Math.min(UPGRADE_CAP, p.bombs + 1);
     else if (pu.kind === "flame") p.flame = Math.min(UPGRADE_CAP, p.flame + 1);
     else p.speed = Math.min(UPGRADE_CAP, p.speed + 1);
+    p.score += SCORE_POWERUP;
   }
 
   private tryPlaceBomb(p: Player): void {
@@ -551,6 +640,7 @@ export class World {
       ownerId: p.id,
       chained: false,
     });
+    p.score += SCORE_BOMB;
   }
 
   private updateBombs(): void {
@@ -585,6 +675,8 @@ export class World {
         if (t === TILE_CRATE) {
           this.map[this.idx(x, y)] = TILE_EMPTY;
           this.mapVersion++;
+          const owner = this.players.get(bomb.ownerId);
+          if (owner) owner.score += SCORE_CRATE;
           this.maybeDropPowerup(x, y);
           break;
         }
@@ -630,6 +722,7 @@ export class World {
       p.alive = false;
       p.moving = false;
       p.deaths++;
+      p.streak = 0; // dying ends your kill streak
       p.respawnAt = this.tick + RESPAWN_TICKS;
       p.bombs = DEFAULT_BOMBS;
       p.flame = DEFAULT_FLAME;
@@ -637,7 +730,15 @@ export class World {
       // credit the kill to the bomb owner (unless it was a self-blast)
       if (flame.ownerId !== p.id) {
         const killer = this.players.get(flame.ownerId);
-        if (killer) killer.kills++;
+        if (killer) {
+          killer.kills++;
+          killer.streak++;
+          killer.score += SCORE_KILL;
+          // rampage bonus, escalating with streak length (3->+1x, 4->+2x, ...)
+          if (killer.streak >= STREAK_BONUS_MIN) {
+            killer.score += SCORE_STREAK_BONUS * (killer.streak - (STREAK_BONUS_MIN - 1));
+          }
+        }
       }
     }
   }
@@ -663,6 +764,8 @@ export class World {
       speed: p.speed,
       kills: p.kills,
       deaths: p.deaths,
+      score: p.score,
+      streak: p.streak,
     }));
   }
 

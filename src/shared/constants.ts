@@ -42,11 +42,29 @@ export const DEFAULT_BOMBS = 1;
 export const DEFAULT_FLAME = 2;
 export const DEFAULT_SPEED = 0;
 
+// Scoring (cumulative per player; persists across deaths).
+export const SCORE_BOMB = 1; // dropping a bomb
+export const SCORE_CRATE = 5; // blowing up a crate (credited to the bomb's owner)
+export const SCORE_POWERUP = 20; // grabbing a powerup
+export const SCORE_KILL = 100; // killing another player
+export const STREAK_HIGHLIGHT = 2; // kill streak at which a player is "on fire" (🔥 in scoreboard)
+export const STREAK_BONUS_MIN = 3; // streak at which bonus points + a red aura kick in
+export const SCORE_STREAK_BONUS = 25; // extra per kill while on a streak, scaling with length
+
 // Respawn
 export const RESPAWN_TICKS = TICK_RATE * 3; // dead for 3s, then respawn
 
 // Crate fill: probability an interior (non-pillar) tile starts as a crate.
 export const CRATE_FILL_CHANCE = 0.72;
+
+// Crate regeneration: crates slowly grow back so powerups keep flowing and the
+// arena never goes stale once everything's been blown up.
+export const CRATE_REGEN_INTERVAL_TICKS = TICK_RATE; // attempt roughly once a second
+export const CRATE_TARGET_FRACTION = 0.5; // keep ~half the open interior as crates
+export const CRATE_REGEN_BATCH = 3; // max crates added per attempt (gradual)
+// Don't regrow crates within this Chebyshev radius of a living player, so nobody
+// gets boxed in by regen (radius 5 => an 11x11 exclusion around each player).
+export const CRATE_REGEN_SAFE_RADIUS = 5;
 
 // Distinct player colors; spawn assigns the first unused one (wraps past 8).
 export const PLAYER_COLORS = [
